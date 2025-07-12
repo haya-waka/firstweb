@@ -1,28 +1,287 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Hayato</title>
-    <link rel="stylesheet" href="stylesheet.css">
-  </head>
-  <body>
-    <div class="headter">
-      <div class="headter-title">HP</div>
-      <div class="headter-list">
-        <ul>
-          <li>はじめに</li>
-          <li>さいごに</li>
-        </ul>
-      </div>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIスライドジェネレーター</title>
+    <!-- Tailwind CSS CDNを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Interフォントを適用 */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* ローディングスピナーのスタイル */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #6366f1; /* Tailwindのindigo-500 */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-6">
+    <div class="bg-white p-8 rounded-lg shadow-xl max-w-3xl w-full my-8">
+        <h1 class="text-4xl font-extrabold text-gray-900 mb-6 text-center">
+            AIスライドジェネレーター
+        </h1>
+        <p class="text-gray-700 mb-6 text-center">
+            プレゼンテーションの元となる文章を入力してください。AIが自動でスライドの構成を生成します。
+        </p>
+
+        <!-- 入力エリア -->
+        <div class="mb-6">
+            <label for="inputText" class="block text-lg font-semibold text-gray-800 mb-2">
+                文章を入力してください:
+            </label>
+            <textarea id="inputText"
+                      class="w-full p-4 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-gray-800 resize-y"
+                      rows="10"
+                      placeholder="例：当社の新製品は、AIを活用したパーソナライズされた学習体験を提供します。主な機能は、ユーザーの進捗に応じた自動カリキュラム調整、インタラクティブな演習、そしてリアルタイムのパフォーマンス分析です。これにより、学習効率が飛躍的に向上し、ユーザーはより短期間で目標を達成できるようになります。教育分野に革命をもたらす製品です。"></textarea>
+        </div>
+
+        <!-- ボタンとローディング表示 -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
+            <button id="generateButton"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-md flex items-center justify-center gap-2">
+                <span id="buttonText">スライドを生成</span>
+                <div id="loadingSpinner" class="spinner hidden"></div>
+            </button>
+        </div>
+
+        <!-- メッセージ表示エリア -->
+        <div id="messageArea" class="mt-4 p-4 text-center text-red-600 font-medium hidden rounded-lg bg-red-50 border border-red-200"></div>
+
+        <!-- 生成されたスライド表示エリア -->
+        <div id="slidesContainer" class="mt-8 grid gap-6">
+            <!-- スライドがここに動的に追加されます -->
+        </div>
     </div>
-    <h1 class="title">Web開発用ページ</h1>
-    <p>Webページ開発をしよう！</p>
-   
-    <img src="https://www.veltra.com/jp/guide/wp-content/uploads/2023/04/pixta_62042822_M.jpg"> 
-    <a href="https://room.chuo-u.ac.jp/ct/syllabus__search">manaba</a>
-    <ol>
-        <li>中央大学理工学部ビジネスデータサイエンス学科</li>
-        <li>VS codeで作成</li>
-    </ol>
-  </body>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const inputText = document.getElementById('inputText');
+            const generateButton = document.getElementById('generateButton');
+            const buttonText = document.getElementById('buttonText');
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            const messageArea = document.getElementById('messageArea');
+            const slidesContainer = document.getElementById('slidesContainer');
+
+            // スライド生成ボタンのクリックイベントリスナー
+            generateButton.addEventListener('click', async () => {
+                const prompt = inputText.value.trim();
+
+                // 入力チェック
+                if (!prompt) {
+                    showMessage('文章を入力してください。', 'error');
+                    return;
+                }
+
+                // UIをローディング状態に設定
+                setLoadingState(true);
+                clearMessages();
+                clearSlides();
+
+                try {
+                    // Gemini APIを呼び出してスライドを生成
+                    const slides = await generateSlides(prompt);
+                    if (slides && slides.length > 0) {
+                        renderSlides(slides);
+                    } else {
+                        showMessage('スライドを生成できませんでした。別の文章でお試しください。', 'warning');
+                    }
+                } catch (error) {
+                    console.error('スライド生成エラー:', error);
+                    showMessage('スライドの生成中にエラーが発生しました。時間を置いて再度お試しください。', 'error');
+                } finally {
+                    // UIを通常状態に戻す
+                    setLoadingState(false);
+                }
+            });
+
+            /**
+             * Gemini APIを呼び出してスライドデータを生成します。
+             * @param {string} text - スライドの元となる文章
+             * @returns {Promise<Array<Object>>} 生成されたスライドの配列
+             */
+            async function generateSlides(text) {
+                // APIキーはCanvas環境で自動的に提供されるため、空文字列のままにしておきます。
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                let chatHistory = [];
+                // スライドのタイトルと箇条書きをJSON形式で生成するようプロンプトを指示
+                chatHistory.push({
+                    role: "user",
+                    parts: [{ text: `以下の文章から、プレゼンテーションのスライドをJSON形式で作成してください。各スライドにはタイトルと箇条書きを含めてください。箇条書きは最大5つまでとし、簡潔にまとめてください。
+
+文章:
+${text}
+
+JSON形式の例:
+[
+  {
+    "title": "スライドのタイトル1",
+    "bulletPoints": [
+      "箇条書き1",
+      "箇条書き2",
+      "箇条書き3"
+    ]
+  },
+  {
+    "title": "スライドのタイトル2",
+    "bulletPoints": [
+      "箇条書きA",
+      "箇条書きB"
+    ]
+  }
+]` }]
+                });
+
+                const payload = {
+                    contents: chatHistory,
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    "title": { "type": "STRING" },
+                                    "bulletPoints": {
+                                        "type": "ARRAY",
+                                        "items": { "type": "STRING" }
+                                    }
+                                },
+                                "propertyOrdering": ["title", "bulletPoints"]
+                            }
+                        }
+                    }
+                };
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`APIエラー: ${response.status} - ${errorData.error.message || '不明なエラー'}`);
+                }
+
+                const result = await response.json();
+
+                // レスポンスの構造をチェック
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const jsonString = result.candidates[0].content.parts[0].text;
+                    try {
+                        const parsedJson = JSON.parse(jsonString);
+                        // 配列であることを確認
+                        if (Array.isArray(parsedJson)) {
+                            return parsedJson;
+                        } else {
+                            console.warn("APIレスポンスが期待される配列形式ではありません。", parsedJson);
+                            return [];
+                        }
+                    } catch (parseError) {
+                        console.error("JSONパースエラー:", parseError);
+                        console.error("受信したJSON文字列:", jsonString);
+                        throw new Error("APIからのレスポンスの解析に失敗しました。");
+                    }
+                } else {
+                    throw new Error("APIからの有効なレスポンスがありませんでした。");
+                }
+            }
+
+            /**
+             * 生成されたスライドをHTMLとして表示します。
+             * @param {Array<Object>} slides - スライドデータの配列
+             */
+            function renderSlides(slides) {
+                slidesContainer.innerHTML = ''; // 既存のスライドをクリア
+                if (slides.length === 0) {
+                    showMessage('生成されたスライドはありません。', 'info');
+                    return;
+                }
+
+                slides.forEach((slide, index) => {
+                    const slideCard = document.createElement('div');
+                    slideCard.className = 'bg-white p-6 rounded-lg shadow-md border border-gray-200';
+                    slideCard.innerHTML = `
+                        <h2 class="text-2xl font-bold text-indigo-700 mb-3">
+                            <span class="text-gray-500 text-xl mr-2">スライド ${index + 1}:</span> ${slide.title || 'タイトルなし'}
+                        </h2>
+                        <ul class="list-disc pl-5 text-gray-700 space-y-2">
+                            ${slide.bulletPoints && slide.bulletPoints.length > 0
+                                ? slide.bulletPoints.map(point => `<li class="text-base">${point}</li>`).join('')
+                                : '<li class="text-gray-500 italic">箇条書きはありません。</li>'
+                            }
+                        </ul>
+                    `;
+                    slidesContainer.appendChild(slideCard);
+                });
+            }
+
+            /**
+             * メッセージを表示します。
+             * @param {string} message - 表示するメッセージ
+             * @param {'error'|'warning'|'info'|'success'} type - メッセージの種類
+             */
+            function showMessage(message, type) {
+                messageArea.textContent = message;
+                messageArea.classList.remove('hidden', 'text-red-600', 'bg-red-50', 'border-red-200', 'text-yellow-700', 'bg-yellow-50', 'border-yellow-200', 'text-blue-700', 'bg-blue-50', 'border-blue-200', 'text-green-700', 'bg-green-50', 'border-green-200');
+                if (type === 'error') {
+                    messageArea.classList.add('text-red-600', 'bg-red-50', 'border-red-200');
+                } else if (type === 'warning') {
+                    messageArea.classList.add('text-yellow-700', 'bg-yellow-50', 'border-yellow-200');
+                } else if (type === 'info') {
+                    messageArea.classList.add('text-blue-700', 'bg-blue-50', 'border-blue-200');
+                } else if (type === 'success') {
+                    messageArea.classList.add('text-green-700', 'bg-green-50', 'border-green-200');
+                }
+                messageArea.classList.remove('hidden');
+            }
+
+            /**
+             * メッセージをクリアします。
+             */
+            function clearMessages() {
+                messageArea.classList.add('hidden');
+                messageArea.textContent = '';
+            }
+
+            /**
+             * スライド表示エリアをクリアします。
+             */
+            function clearSlides() {
+                slidesContainer.innerHTML = '';
+            }
+
+            /**
+             * UIのローディング状態を設定します。
+             * @param {boolean} isLoading - ローディング中かどうか
+             */
+            function setLoadingState(isLoading) {
+                generateButton.disabled = isLoading;
+                if (isLoading) {
+                    buttonText.textContent = '生成中...';
+                    loadingSpinner.classList.remove('hidden');
+                } else {
+                    buttonText.textContent = 'スライドを生成';
+                    loadingSpinner.classList.add('hidden');
+                }
+            }
+        });
+    </script>
+</body>
 </html>
